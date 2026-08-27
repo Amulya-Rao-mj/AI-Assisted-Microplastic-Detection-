@@ -1,0 +1,7 @@
+dataset/
+__pycache__/
+*.pyc
+MAJORPROJECT/
+venv/
+*.pyd
+*.dll
