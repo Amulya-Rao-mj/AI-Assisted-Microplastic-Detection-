@@ -2,11 +2,8 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-<<<<<<< HEAD
-=======
 import cv2
 import os
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
 
 # --------------------------------------------------
@@ -15,7 +12,7 @@ import os
 
 st.set_page_config(
     page_title="Microplastic Screening",
-    page_icon="🔬",
+    page_icon="≡ƒö¼",
     layout="wide"
 )
 
@@ -24,9 +21,6 @@ st.set_page_config(
 # Load trained YOLO model
 # --------------------------------------------------
 
-<<<<<<< HEAD
-MODEL_PATH = r"D:\MAJORPROJECT\runs\detect\results\microplastic_detection-2\weights\best.pt"
-=======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODEL_PATH = os.path.join(
@@ -45,14 +39,11 @@ if not os.path.exists(MODEL_PATH):
         f"Expected location:\n{MODEL_PATH}"
     )
     st.stop()
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
 model = YOLO(MODEL_PATH)
 
 
 # --------------------------------------------------
-<<<<<<< HEAD
-=======
 # Risk Score Calculation
 # --------------------------------------------------
 
@@ -328,20 +319,15 @@ def generate_heatmap(image_array, bounding_boxes):
 
 
 # --------------------------------------------------
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 # Title
 # --------------------------------------------------
 
-st.title("🔬 AI-Assisted Microplastic Screening System")
+st.title("≡ƒö¼ AI-Assisted Microplastic Screening System")
 
 st.write(
-<<<<<<< HEAD
-    "Upload a microscopic image to detect potential microplastic particles."
-=======
     "Upload a microscopic image to detect potential "
     "microplastic particles and estimate a preliminary "
     "screening risk score."
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 )
 
 st.info(
@@ -366,10 +352,6 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-<<<<<<< HEAD
-    # Read image
-    image = Image.open(uploaded_file)
-=======
     # --------------------------------------------------
     # Read image
     # --------------------------------------------------
@@ -380,7 +362,6 @@ if uploaded_file is not None:
 
     image_height, image_width = image_array.shape[:2]
 
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
     # --------------------------------------------------
     # Original Image
@@ -394,20 +375,6 @@ if uploaded_file is not None:
     )
 
 
-<<<<<<< HEAD
-    # Convert image to NumPy
-    image_array = np.array(image)
-
-
-    # --------------------------------------------------
-    # Run YOLO detection
-    # --------------------------------------------------
-
-    results = model(
-        image_array,
-        conf=0.50
-    )
-=======
     # --------------------------------------------------
     # Run YOLO Detection
     # --------------------------------------------------
@@ -418,31 +385,16 @@ if uploaded_file is not None:
             image_array,
             conf=0.50
         )
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
     result = results[0]
 
 
     # --------------------------------------------------
-<<<<<<< HEAD
-    # Detection information
-=======
     # Detection Information
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
     # --------------------------------------------------
 
     boxes = result.boxes
 
-<<<<<<< HEAD
-    # Number of detected particles
-    particle_count = len(boxes)
-
-
-    # Confidence values
-    if particle_count > 0:
-
-        confidences = boxes.conf.cpu().numpy()
-=======
     particle_count = len(boxes)
 
 
@@ -457,7 +409,6 @@ if uploaded_file is not None:
             .cpu()
             .numpy()
         )
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
         average_confidence = float(
             np.mean(confidences)
@@ -465,19 +416,12 @@ if uploaded_file is not None:
 
     else:
 
-<<<<<<< HEAD
-        confidences = []
-=======
         confidences = np.array([])
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
         average_confidence = 0.0
 
 
     # --------------------------------------------------
-<<<<<<< HEAD
-    # Annotated image
-=======
     # Bounding Boxes
     # --------------------------------------------------
 
@@ -498,7 +442,6 @@ if uploaded_file is not None:
 
     # --------------------------------------------------
     # Annotated Image
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
     # --------------------------------------------------
 
     annotated_image = result.plot()
@@ -512,14 +455,6 @@ if uploaded_file is not None:
 
 
     # --------------------------------------------------
-<<<<<<< HEAD
-    # Analysis Results
-    # --------------------------------------------------
-
-    st.subheader("Analysis Results")
-
-    col1, col2 = st.columns(2)
-=======
     # Risk Score Calculation
     # --------------------------------------------------
 
@@ -547,21 +482,16 @@ if uploaded_file is not None:
     # Analysis Results
     # --------------------------------------------------
 
-    st.subheader("📊 Analysis Results")
+    st.subheader("≡ƒôè Analysis Results")
 
 
     col1, col2, col3 = st.columns(3)
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
 
     with col1:
 
         st.metric(
-<<<<<<< HEAD
-            "Total Particles Detected",
-=======
             "Total Particles",
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
             particle_count
         )
 
@@ -574,8 +504,6 @@ if uploaded_file is not None:
         )
 
 
-<<<<<<< HEAD
-=======
     with col3:
 
         st.metric(
@@ -588,34 +516,34 @@ if uploaded_file is not None:
     # Risk Level
     # --------------------------------------------------
 
-    st.subheader("⚠️ Screening Risk Assessment")
+    st.subheader("ΓÜá∩╕Å Screening Risk Assessment")
 
 
     if risk_level == "Low Risk":
 
         st.success(
-            f"🟢 {risk_level} — "
+            f"≡ƒƒó {risk_level} ΓÇö "
             f"Screening Score: {risk_score:.1f}/100"
         )
 
     elif risk_level == "Moderate Risk":
 
         st.warning(
-            f"🟡 {risk_level} — "
+            f"≡ƒƒí {risk_level} ΓÇö "
             f"Screening Score: {risk_score:.1f}/100"
         )
 
     elif risk_level == "High Risk":
 
         st.warning(
-            f"🟠 {risk_level} — "
+            f"≡ƒƒá {risk_level} ΓÇö "
             f"Screening Score: {risk_score:.1f}/100"
         )
 
     else:
 
         st.error(
-            f"🔴 {risk_level} — "
+            f"≡ƒö┤ {risk_level} ΓÇö "
             f"Screening Score: {risk_score:.1f}/100"
         )
 
@@ -682,7 +610,7 @@ if uploaded_file is not None:
 
     if particle_count > 0:
 
-        st.subheader("🔥 Particle Density Heatmap")
+        st.subheader("≡ƒöÑ Particle Density Heatmap")
 
         heatmap_image = generate_heatmap(
             image_array,
@@ -704,57 +632,19 @@ if uploaded_file is not None:
         )
 
 
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
     # --------------------------------------------------
     # Detection Details
     # --------------------------------------------------
 
     if particle_count > 0:
 
-<<<<<<< HEAD
-        st.subheader("Detection Details")
+        st.subheader("≡ƒöì Detection Details")
 
 
-        # Get bounding boxes
-        bounding_boxes = boxes.xyxy.cpu().numpy()
-
-
-        # Store detection information for report
-=======
-        st.subheader("🔍 Detection Details")
-
-
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
         detection_data = []
 
 
         for i, (box, confidence) in enumerate(
-<<<<<<< HEAD
-            zip(bounding_boxes, confidences),
-            start=1
-        ):
-
-            # Bounding box coordinates
-            x1, y1, x2, y2 = box
-
-
-            # Calculate dimensions in pixels
-            width_pixels = x2 - x1
-
-            height_pixels = y2 - y1
-
-
-            # Save information
-            detection_data.append({
-                "particle": i,
-                "confidence": confidence,
-                "width": width_pixels,
-                "height": height_pixels
-            })
-
-
-            # Display information
-=======
             zip(
                 bounding_boxes,
                 confidences
@@ -784,23 +674,11 @@ if uploaded_file is not None:
             })
 
 
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
             st.write(
                 f"**Particle {i}**"
             )
 
             st.write(
-<<<<<<< HEAD
-                f"Confidence: {confidence * 100:.1f}%"
-            )
-
-            st.write(
-                f"Width: {width_pixels:.1f} pixels"
-            )
-
-            st.write(
-                f"Height: {height_pixels:.1f} pixels"
-=======
                 f"Confidence: "
                 f"{confidence * 100:.1f}%"
             )
@@ -813,7 +691,6 @@ if uploaded_file is not None:
             st.write(
                 f"Height: "
                 f"{height_pixels:.1f} pixels"
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
             )
 
             st.divider()
@@ -822,12 +699,8 @@ if uploaded_file is not None:
     else:
 
         st.warning(
-<<<<<<< HEAD
-            "No potential microplastic particles were detected."
-=======
             "No potential microplastic particles "
             "were detected."
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
         )
 
 
@@ -837,7 +710,7 @@ if uploaded_file is not None:
 
     if particle_count > 0:
 
-        st.subheader("📄 Analysis Report")
+        st.subheader("≡ƒôä Analysis Report")
 
 
         report = ""
@@ -846,11 +719,7 @@ if uploaded_file is not None:
             "AI-ASSISTED MICROPLASTIC SCREENING REPORT\n"
         )
 
-<<<<<<< HEAD
-        report += "=" * 55 + "\n\n"
-=======
         report += "=" * 60 + "\n\n"
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
 
         # Image information
@@ -859,14 +728,11 @@ if uploaded_file is not None:
         )
 
         report += (
-<<<<<<< HEAD
-=======
             f"Image Dimensions: "
             f"{image_width} x {image_height} pixels\n"
         )
 
         report += (
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
             f"Total Particles Detected: "
             f"{particle_count}\n"
         )
@@ -877,8 +743,6 @@ if uploaded_file is not None:
         )
 
 
-<<<<<<< HEAD
-=======
         # Risk assessment
         report += (
             "SCREENING RISK ASSESSMENT\n"
@@ -925,17 +789,12 @@ if uploaded_file is not None:
         )
 
 
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
         # Detection details
         report += (
             "DETECTION DETAILS\n"
         )
 
-<<<<<<< HEAD
-        report += "-" * 55 + "\n"
-=======
         report += "-" * 60 + "\n"
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
 
 
         for data in detection_data:
@@ -956,31 +815,16 @@ if uploaded_file is not None:
 
             report += (
                 f"Height: "
-<<<<<<< HEAD
-                f"{data['height']:.1f} pixels\n\n"
-=======
                 f"{data['height']:.1f} pixels\n"
             )
 
             report += (
                 f"Bounding Box Area: "
-                f"{data['area']:.1f} pixels²\n\n"
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
+                f"{data['area']:.1f} pixels┬▓\n\n"
             )
 
 
         # Scientific disclaimer
-<<<<<<< HEAD
-        report += "\n"
-        report += "IMPORTANT NOTE\n"
-        report += "-" * 55 + "\n"
-
-        report += (
-            "This system provides preliminary AI-assisted "
-            "screening of potential microplastic particles. "
-            "It does not replace laboratory confirmation "
-            "techniques such as FTIR or Raman spectroscopy.\n"
-=======
         report += (
             "IMPORTANT NOTE\n"
         )
@@ -997,13 +841,12 @@ if uploaded_file is not None:
             "risk. Laboratory confirmation using techniques "
             "such as FTIR or Raman spectroscopy is required "
             "for definitive identification and characterization.\n"
->>>>>>> 0e6bc09f9af3408e46d6c9e55190ab6d9107e0b7
         )
 
 
         # Download button
         st.download_button(
-            label="📥 Download Analysis Report",
+            label="≡ƒôÑ Download Analysis Report",
             data=report,
             file_name="microplastic_analysis_report.txt",
             mime="text/plain"
