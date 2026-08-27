@@ -1,4 +1,7 @@
 dataset/
-_pycache_/
+__pycache__/
 *.pyc
 MAJORPROJECT/
+venv/
+*.pyd
+*.dll
