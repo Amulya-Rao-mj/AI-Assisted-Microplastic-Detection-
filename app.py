@@ -4,11 +4,14 @@ from PIL import Image
 import numpy as np
 import cv2
 import os
+import torch
+import torch.nn as nn
+from torchvision import models, transforms
 
 
-# --------------------------------------------------
-# Page configuration
-# --------------------------------------------------
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="Microplastic Screening",
@@ -17,11 +20,18 @@ st.set_page_config(
 )
 
 
-# --------------------------------------------------
-# Load trained YOLO model
-# --------------------------------------------------
+# ============================================================
+# BASE DIRECTORY
+# ============================================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+
+# ============================================================
+# YOLO MODEL
+# ============================================================
 
 MODEL_PATH = os.path.join(
     BASE_DIR,
@@ -33,90 +43,286 @@ MODEL_PATH = os.path.join(
     "best.pt"
 )
 
+
 if not os.path.exists(MODEL_PATH):
+
     st.error(
         "YOLO model not found.\n\n"
         f"Expected location:\n{MODEL_PATH}"
     )
+
     st.stop()
 
-model = YOLO(MODEL_PATH)
+
+@st.cache_resource
+def load_yolo_model():
+
+    return YOLO(MODEL_PATH)
 
 
-# --------------------------------------------------
-# Risk Score Calculation
-# --------------------------------------------------
+model = load_yolo_model()
+
+
+# ============================================================
+# CLASSIFIER MODEL
+# ============================================================
+
+CLASSIFIER_PATH = os.path.join(
+    BASE_DIR,
+    "models",
+    "microplastic_classifier.pth"
+)
+
+
+CLASS_NAMES = [
+    "fibre",
+    "fragment"
+]
+
+
+@st.cache_resource
+def load_classifier():
+
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
+
+    classifier = models.resnet18(
+        weights=None
+    )
+
+    num_features = classifier.fc.in_features
+
+    classifier.fc = nn.Linear(
+        num_features,
+        2
+    )
+
+    classifier.load_state_dict(
+        torch.load(
+            CLASSIFIER_PATH,
+            map_location=device
+        )
+    )
+
+    classifier = classifier.to(device)
+
+    classifier.eval()
+
+    return classifier, device
+
+
+if not os.path.exists(CLASSIFIER_PATH):
+
+    st.error(
+        "Microplastic classifier not found.\n\n"
+        f"Expected location:\n{CLASSIFIER_PATH}\n\n"
+        "Train the classifier first using "
+        "train_classifier.py."
+    )
+
+    st.stop()
+
+
+classifier, classifier_device = load_classifier()
+
+
+# ============================================================
+# CLASSIFIER IMAGE TRANSFORM
+# ============================================================
+
+classifier_transform = transforms.Compose([
+
+    transforms.Resize(
+        (224, 224)
+    ),
+
+    transforms.ToTensor(),
+
+    transforms.Normalize(
+        mean=[
+            0.485,
+            0.456,
+            0.406
+        ],
+
+        std=[
+            0.229,
+            0.224,
+            0.225
+        ]
+    )
+])
+
+
+# ============================================================
+# CLASSIFY PARTICLE
+# ============================================================
+
+def classify_particle(crop):
+
+    if crop is None:
+        return "unknown", 0.0
+
+    if crop.size == 0:
+        return "unknown", 0.0
+
+    crop_rgb = cv2.cvtColor(
+        crop,
+        cv2.COLOR_BGR2RGB
+    )
+
+    pil_image = Image.fromarray(
+        crop_rgb
+    )
+
+    image_tensor = classifier_transform(
+        pil_image
+    )
+
+    image_tensor = image_tensor.unsqueeze(0)
+
+    image_tensor = image_tensor.to(
+        classifier_device
+    )
+
+
+    with torch.no_grad():
+
+        outputs = classifier(
+            image_tensor
+        )
+
+        probabilities = torch.softmax(
+            outputs,
+            dim=1
+        )
+
+        confidence, predicted = torch.max(
+            probabilities,
+            1
+        )
+
+
+    class_index = predicted.item()
+
+    confidence_value = confidence.item()
+
+    class_name = CLASS_NAMES[
+        class_index
+    ]
+
+
+    return (
+        class_name,
+        confidence_value
+    )
+
+
+# ============================================================
+# RISK SCORE CALCULATION
+# ============================================================
 
 def calculate_risk_score(
     particle_count,
     average_confidence,
     bounding_boxes,
     image_width,
-    image_height
+    image_height,
+    classifications=None
 ):
-    """
-    Calculate a preliminary AI-assisted screening risk score
-    between 0 and 100.
-
-    Factors:
-    1. Particle density       -> 40%
-    2. Detection confidence   -> 30%
-    3. Relative particle size -> 20%
-    4. Spatial clustering     -> 10%
-    """
 
     if particle_count == 0:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
 
-    # --------------------------------------------------
-    # 1. Particle Density Score - 40%
-    # --------------------------------------------------
-
-    image_area = image_width * image_height
-
-    density = particle_count / image_area * 1_000_000
-
-    # Normalize density.
-    # 50 particles per million pixels is considered
-    # a high-density reference point for this screening score.
-    density_score = min((density / 50.0) * 100, 100)
+        return (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        )
 
 
-    # --------------------------------------------------
-    # 2. Confidence Score - 30%
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 1. Particle Density - 40%
+    # --------------------------------------------------------
 
-    confidence_score = average_confidence * 100
+    image_area = (
+        image_width *
+        image_height
+    )
+
+    density = (
+        particle_count /
+        image_area *
+        1_000_000
+    )
 
 
-    # --------------------------------------------------
-    # 3. Relative Particle Size Score - 20%
-    # --------------------------------------------------
+    density_score = min(
+        (density / 50.0) * 100,
+        100
+    )
+
+
+    # --------------------------------------------------------
+    # 2. Detection Confidence - 30%
+    # --------------------------------------------------------
+
+    confidence_score = (
+        average_confidence * 100
+    )
+
+
+    # --------------------------------------------------------
+    # 3. Relative Particle Size - 20%
+    # --------------------------------------------------------
 
     relative_sizes = []
+
 
     for box in bounding_boxes:
 
         x1, y1, x2, y2 = box
 
-        width = max(x2 - x1, 0)
-        height = max(y2 - y1, 0)
+        width = max(
+            x2 - x1,
+            0
+        )
 
-        particle_area = width * height
+        height = max(
+            y2 - y1,
+            0
+        )
 
-        relative_area = particle_area / image_area
+        particle_area = (
+            width *
+            height
+        )
 
-        relative_sizes.append(relative_area)
+        relative_area = (
+            particle_area /
+            image_area
+        )
+
+        relative_sizes.append(
+            relative_area
+        )
 
 
     if relative_sizes:
 
-        average_relative_area = np.mean(relative_sizes)
+        average_relative_area = np.mean(
+            relative_sizes
+        )
 
-        # Reference value for normalization.
-        # This represents 1% of the image area.
         size_score = min(
-            (average_relative_area / 0.01) * 100,
+            (
+                average_relative_area /
+                0.01
+            ) * 100,
             100
         )
 
@@ -125,49 +331,71 @@ def calculate_risk_score(
         size_score = 0.0
 
 
-    # --------------------------------------------------
-    # 4. Spatial Clustering Score - 10%
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 4. Spatial Clustering - 10%
+    # --------------------------------------------------------
 
     centers = []
+
 
     for box in bounding_boxes:
 
         x1, y1, x2, y2 = box
 
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
+        center_x = (
+            x1 + x2
+        ) / 2
 
-        centers.append([center_x, center_y])
+        center_y = (
+            y1 + y2
+        ) / 2
+
+        centers.append(
+            [
+                center_x,
+                center_y
+            ]
+        )
 
 
     if len(centers) >= 2:
 
-        centers = np.array(centers)
+        centers = np.array(
+            centers
+        )
 
-        # Calculate distance of each particle from
-        # the average particle location.
-        center_mean = np.mean(centers, axis=0)
+        center_mean = np.mean(
+            centers,
+            axis=0
+        )
 
         distances = np.linalg.norm(
-            centers - center_mean,
+            centers -
+            center_mean,
             axis=1
         )
 
-        average_distance = np.mean(distances)
+        average_distance = np.mean(
+            distances
+        )
 
         image_diagonal = np.sqrt(
             image_width ** 2 +
             image_height ** 2
         )
 
-        # Smaller average distance means particles
-        # are more concentrated in one region.
-        spread_ratio = average_distance / image_diagonal
+        spread_ratio = (
+            average_distance /
+            image_diagonal
+        )
 
         clustering_score = max(
             0,
-            min((1 - spread_ratio) * 100, 100)
+            min(
+                (1 - spread_ratio) *
+                100,
+                100
+            )
         )
 
     else:
@@ -175,20 +403,29 @@ def calculate_risk_score(
         clustering_score = 0.0
 
 
-    # --------------------------------------------------
-    # Final Weighted Risk Score
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Final Risk Score
+    # --------------------------------------------------------
 
     risk_score = (
+
         0.40 * density_score +
+
         0.30 * confidence_score +
+
         0.20 * size_score +
+
         0.10 * clustering_score
+
     )
+
 
     risk_score = max(
         0,
-        min(risk_score, 100)
+        min(
+            risk_score,
+            100
+        )
     )
 
 
@@ -201,80 +438,119 @@ def calculate_risk_score(
     )
 
 
-# --------------------------------------------------
-# Risk Level
-# --------------------------------------------------
+# ============================================================
+# RISK LEVEL
+# ============================================================
 
 def get_risk_level(risk_score):
 
     if risk_score <= 30:
+
         return "Low Risk"
 
     elif risk_score <= 60:
+
         return "Moderate Risk"
 
     elif risk_score <= 80:
+
         return "High Risk"
 
     else:
+
         return "Very High Risk"
 
 
-# --------------------------------------------------
-# Generate Heatmap
-# --------------------------------------------------
+# ============================================================
+# GENERATE HEATMAP
+# ============================================================
 
-def generate_heatmap(image_array, bounding_boxes):
+def generate_heatmap(
+    image_array,
+    bounding_boxes
+):
 
-    # Make sure image is RGB
     if len(image_array.shape) == 2:
+
         image_array = cv2.cvtColor(
             image_array,
             cv2.COLOR_GRAY2RGB
         )
 
-    height, width = image_array.shape[:2]
 
-    # Create empty density map
+    height, width = (
+        image_array.shape[:2]
+    )
+
+
     density_map = np.zeros(
         (height, width),
         dtype=np.float32
     )
 
-    # Add each particle location
+
     for box in bounding_boxes:
 
         x1, y1, x2, y2 = box
 
-        center_x = int((x1 + x2) / 2)
-        center_y = int((y1 + y2) / 2)
+        center_x = int(
+            (x1 + x2) / 2
+        )
 
-        # Make sure coordinates are inside image
-        center_x = max(0, min(center_x, width - 1))
-        center_y = max(0, min(center_y, height - 1))
-
-        density_map[center_y, center_x] += 1
+        center_y = int(
+            (y1 + y2) / 2
+        )
 
 
-    # Smooth the density map
-    # This creates the heatmap effect.
+        center_x = max(
+            0,
+            min(
+                center_x,
+                width - 1
+            )
+        )
+
+        center_y = max(
+            0,
+            min(
+                center_y,
+                height - 1
+            )
+        )
+
+
+        density_map[
+            center_y,
+            center_x
+        ] += 1
+
+
     kernel_size = max(
         21,
-        int(min(height, width) * 0.08)
+        int(
+            min(
+                height,
+                width
+            ) * 0.08
+        )
     )
 
-    # Kernel size must be odd
+
     if kernel_size % 2 == 0:
+
         kernel_size += 1
+
 
     blurred = cv2.GaussianBlur(
         density_map,
-        (kernel_size, kernel_size),
+        (
+            kernel_size,
+            kernel_size
+        ),
         0
     )
 
 
-    # Normalize
     if np.max(blurred) > 0:
 
         normalized = cv2.normalize(
@@ -283,7 +559,9 @@ def generate_heatmap(image_array, bounding_boxes):
             0,
             255,
             cv2.NORM_MINMAX
-        ).astype(np.uint8)
+        ).astype(
+            np.uint8
+        )
 
     else:
 
@@ -293,20 +571,18 @@ def generate_heatmap(image_array, bounding_boxes):
         )
 
 
-    # Apply OpenCV colormap
     heatmap = cv2.applyColorMap(
         normalized,
         cv2.COLORMAP_JET
     )
 
-    # Convert BGR -> RGB
+
     heatmap = cv2.cvtColor(
         heatmap,
         cv2.COLOR_BGR2RGB
     )
 
 
-    # Overlay heatmap on original image
     overlay = cv2.addWeighted(
         image_array,
         0.55,
@@ -315,59 +591,80 @@ def generate_heatmap(image_array, bounding_boxes):
         0
     )
 
+
     return overlay
 
 
-# --------------------------------------------------
-# Title
-# --------------------------------------------------
+# ============================================================
+# TITLE
+# ============================================================
 
-st.title("🔬 AI-Assisted Microplastic Screening System")
+st.title(
+    "🔬 AI-Assisted Microplastic Screening System"
+)
+
 
 st.write(
     "Upload a microscopic image to detect potential "
-    "microplastic particles and estimate a preliminary "
-    "screening risk score."
+    "microplastic particles, classify their morphology "
+    "and estimate a preliminary screening risk score."
 )
+
 
 st.info(
-    "This system provides preliminary AI-assisted screening "
-    "and does not replace laboratory confirmation."
+    "This system provides preliminary AI-assisted "
+    "screening and does not replace laboratory confirmation."
 )
 
 
-# --------------------------------------------------
-# Upload image
-# --------------------------------------------------
+# ============================================================
+# UPLOAD IMAGE
+# ============================================================
 
 uploaded_file = st.file_uploader(
     "Upload a microscopic image",
-    type=["jpg", "jpeg", "png"]
+    type=[
+        "jpg",
+        "jpeg",
+        "png"
+    ]
 )
 
 
-# --------------------------------------------------
-# Process uploaded image
-# --------------------------------------------------
+# ============================================================
+# PROCESS IMAGE
+# ============================================================
 
 if uploaded_file is not None:
 
-    # --------------------------------------------------
-    # Read image
-    # --------------------------------------------------
 
-    image = Image.open(uploaded_file).convert("RGB")
+    # --------------------------------------------------------
+    # Read Image
+    # --------------------------------------------------------
 
-    image_array = np.array(image)
+    image = Image.open(
+        uploaded_file
+    ).convert("RGB")
 
-    image_height, image_width = image_array.shape[:2]
+
+    image_array = np.array(
+        image
+    )
 
 
-    # --------------------------------------------------
+    image_height, image_width = (
+        image_array.shape[:2]
+    )
+
+
+    # --------------------------------------------------------
     # Original Image
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
-    st.subheader("Original Image")
+    st.subheader(
+        "Original Image"
+    )
+
 
     st.image(
         image,
@@ -375,32 +672,34 @@ if uploaded_file is not None:
     )
 
 
-    # --------------------------------------------------
-    # Run YOLO Detection
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # YOLO Detection
+    # --------------------------------------------------------
 
-    with st.spinner("Detecting potential microplastic particles..."):
+    with st.spinner(
+        "Detecting potential microplastic particles..."
+    ):
 
         results = model(
             image_array,
             conf=0.50
         )
 
+
     result = results[0]
 
 
-    # --------------------------------------------------
-    # Detection Information
-    # --------------------------------------------------
-
     boxes = result.boxes
 
-    particle_count = len(boxes)
+
+    particle_count = len(
+        boxes
+    )
 
 
-    # --------------------------------------------------
-    # Confidence Values
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Detection Confidence
+    # --------------------------------------------------------
 
     if particle_count > 0:
 
@@ -411,7 +710,9 @@ if uploaded_file is not None:
         )
 
         average_confidence = float(
-            np.mean(confidences)
+            np.mean(
+                confidences
+            )
         )
 
     else:
@@ -421,9 +722,9 @@ if uploaded_file is not None:
         average_confidence = 0.0
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Bounding Boxes
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     if particle_count > 0:
 
@@ -440,13 +741,17 @@ if uploaded_file is not None:
         )
 
 
-    # --------------------------------------------------
-    # Annotated Image
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # YOLO Annotated Image
+    # --------------------------------------------------------
 
     annotated_image = result.plot()
 
-    st.subheader("Detected Particles")
+
+    st.subheader(
+        "Detected Particles"
+    )
+
 
     st.image(
         annotated_image,
@@ -454,9 +759,132 @@ if uploaded_file is not None:
     )
 
 
-    # --------------------------------------------------
-    # Risk Score Calculation
-    # --------------------------------------------------
+    # ========================================================
+    # CLASSIFICATION
+    # ========================================================
+
+    classifications = []
+
+    classification_confidences = []
+
+
+    if particle_count > 0:
+
+        st.subheader(
+            "🧬 Particle Classification"
+        )
+
+
+        for i, box in enumerate(
+            bounding_boxes,
+            start=1
+        ):
+
+
+            x1, y1, x2, y2 = box
+
+
+            # Convert coordinates
+            x1 = max(
+                0,
+                int(x1)
+            )
+
+            y1 = max(
+                0,
+                int(y1)
+            )
+
+            x2 = min(
+                image_width,
+                int(x2)
+            )
+
+            y2 = min(
+                image_height,
+                int(y2)
+            )
+
+
+            # Crop detected particle
+            crop = image_array[
+                y1:y2,
+                x1:x2
+            ]
+
+
+            # Convert RGB -> BGR
+            crop_bgr = cv2.cvtColor(
+                crop,
+                cv2.COLOR_RGB2BGR
+            )
+
+
+            class_name, class_confidence = (
+                classify_particle(
+                    crop_bgr
+                )
+            )
+
+
+            classifications.append(
+                class_name
+            )
+
+
+            classification_confidences.append(
+                class_confidence
+            )
+
+
+            # ------------------------------------------------
+            # Display classification
+            # ------------------------------------------------
+
+            col1, col2, col3 = st.columns(
+                3
+            )
+
+
+            with col1:
+
+                st.write(
+                    f"**Particle {i}**"
+                )
+
+
+            with col2:
+
+                st.write(
+                    f"Classification: "
+                    f"**{class_name.title()}**"
+                )
+
+
+            with col3:
+
+                st.write(
+                    f"Confidence: "
+                    f"**{class_confidence * 100:.1f}%**"
+                )
+
+
+    # ========================================================
+    # CLASSIFICATION COUNTS
+    # ========================================================
+
+    fibre_count = classifications.count(
+        "fibre"
+    )
+
+    fragment_count = classifications.count(
+        "fragment"
+    )
+
+
+    # ========================================================
+    # RISK SCORE
+    # ========================================================
 
     (
         risk_score,
@@ -469,7 +897,8 @@ if uploaded_file is not None:
         average_confidence,
         bounding_boxes,
         image_width,
-        image_height
+        image_height,
+        classifications
     )
 
 
@@ -478,14 +907,18 @@ if uploaded_file is not None:
     )
 
 
-    # --------------------------------------------------
-    # Analysis Results
-    # --------------------------------------------------
+    # ========================================================
+    # ANALYSIS RESULTS
+    # ========================================================
 
-    st.subheader("📊 Analysis Results")
+    st.subheader(
+        "📊 Analysis Results"
+    )
 
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(
+        5
+    )
 
 
     with col1:
@@ -499,12 +932,28 @@ if uploaded_file is not None:
     with col2:
 
         st.metric(
-            "Average Confidence",
-            f"{average_confidence * 100:.1f}%"
+            "Fibre",
+            fibre_count
         )
 
 
     with col3:
+
+        st.metric(
+            "Fragment",
+            fragment_count
+        )
+
+
+    with col4:
+
+        st.metric(
+            "Avg Detection Confidence",
+            f"{average_confidence * 100:.1f}%"
+        )
+
+
+    with col5:
 
         st.metric(
             "Risk Score",
@@ -512,52 +961,65 @@ if uploaded_file is not None:
         )
 
 
-    # --------------------------------------------------
-    # Risk Level
-    # --------------------------------------------------
+    # ========================================================
+    # RISK LEVEL
+    # ========================================================
 
-    st.subheader("⚠️ Screening Risk Assessment")
+    st.subheader(
+        "⚠️ Screening Risk Assessment"
+    )
 
 
     if risk_level == "Low Risk":
 
         st.success(
             f"🟢 {risk_level} — "
-            f"Screening Score: {risk_score:.1f}/100"
+            f"Screening Score: "
+            f"{risk_score:.1f}/100"
         )
+
 
     elif risk_level == "Moderate Risk":
 
         st.warning(
             f"🟡 {risk_level} — "
-            f"Screening Score: {risk_score:.1f}/100"
+            f"Screening Score: "
+            f"{risk_score:.1f}/100"
         )
+
 
     elif risk_level == "High Risk":
 
         st.warning(
             f"🟠 {risk_level} — "
-            f"Screening Score: {risk_score:.1f}/100"
+            f"Screening Score: "
+            f"{risk_score:.1f}/100"
         )
+
 
     else:
 
         st.error(
             f"🔴 {risk_level} — "
-            f"Screening Score: {risk_score:.1f}/100"
+            f"Screening Score: "
+            f"{risk_score:.1f}/100"
         )
 
 
-    # --------------------------------------------------
-    # Risk Factor Breakdown
-    # --------------------------------------------------
+    # ========================================================
+    # RISK FACTOR BREAKDOWN
+    # ========================================================
 
     if particle_count > 0:
 
-        st.subheader("Risk Factor Breakdown")
+        st.subheader(
+            "Risk Factor Breakdown"
+        )
 
 
-        risk_col1, risk_col2 = st.columns(2)
+        risk_col1, risk_col2 = st.columns(
+            2
+        )
 
 
         with risk_col1:
@@ -604,27 +1066,32 @@ if uploaded_file is not None:
             )
 
 
-    # --------------------------------------------------
-    # Heatmap
-    # --------------------------------------------------
+    # ========================================================
+    # HEATMAP
+    # ========================================================
 
     if particle_count > 0:
 
-        st.subheader("🔥 Particle Density Heatmap")
+        st.subheader(
+            "🔥 Particle Density Heatmap"
+        )
+
 
         heatmap_image = generate_heatmap(
             image_array,
             bounding_boxes
         )
 
+
         st.image(
             heatmap_image,
             caption=(
-                "Heatmap showing spatial concentration "
-                "of detected particles"
+                "Heatmap showing spatial "
+                "concentration of detected particles"
             ),
             use_container_width=True
         )
+
 
         st.caption(
             "Brighter regions indicate areas with a higher "
@@ -632,19 +1099,24 @@ if uploaded_file is not None:
         )
 
 
-    # --------------------------------------------------
-    # Detection Details
-    # --------------------------------------------------
+    # ========================================================
+    # DETECTION DETAILS
+    # ========================================================
 
     if particle_count > 0:
 
-        st.subheader("🔍 Detection Details")
+        st.subheader(
+            "🔍 Detection Details"
+        )
 
 
         detection_data = []
 
 
-        for i, (box, confidence) in enumerate(
+        for i, (
+            box,
+            detection_confidence
+        ) in enumerate(
             zip(
                 bounding_boxes,
                 confidences
@@ -652,11 +1124,17 @@ if uploaded_file is not None:
             start=1
         ):
 
+
             x1, y1, x2, y2 = box
 
 
-            width_pixels = x2 - x1
-            height_pixels = y2 - y1
+            width_pixels = (
+                x2 - x1
+            )
+
+            height_pixels = (
+                y2 - y1
+            )
 
 
             particle_area = (
@@ -665,33 +1143,80 @@ if uploaded_file is not None:
             )
 
 
+            classification = (
+                classifications[i - 1]
+            )
+
+
+            classification_confidence = (
+                classification_confidences[
+                    i - 1
+                ]
+            )
+
+
             detection_data.append({
+
                 "particle": i,
-                "confidence": float(confidence),
-                "width": float(width_pixels),
-                "height": float(height_pixels),
-                "area": float(particle_area)
+
+                "classification":
+                    classification,
+
+                "classification_confidence":
+                    classification_confidence,
+
+                "detection_confidence":
+                    float(
+                        detection_confidence
+                    ),
+
+                "width":
+                    float(
+                        width_pixels
+                    ),
+
+                "height":
+                    float(
+                        height_pixels
+                    ),
+
+                "area":
+                    float(
+                        particle_area
+                    )
+
             })
 
 
             st.write(
-                f"**Particle {i}**"
+                f"**Particle {i} — "
+                f"{classification.title()}**"
             )
 
+
             st.write(
-                f"Confidence: "
-                f"{confidence * 100:.1f}%"
+                f"Detection confidence: "
+                f"{detection_confidence * 100:.1f}%"
             )
+
+
+            st.write(
+                f"Classification confidence: "
+                f"{classification_confidence * 100:.1f}%"
+            )
+
 
             st.write(
                 f"Width: "
                 f"{width_pixels:.1f} pixels"
             )
 
+
             st.write(
                 f"Height: "
                 f"{height_pixels:.1f} pixels"
             )
+
 
             st.divider()
 
@@ -704,56 +1229,92 @@ if uploaded_file is not None:
         )
 
 
-    # --------------------------------------------------
-    # Generate Analysis Report
-    # --------------------------------------------------
+    # ========================================================
+    # ANALYSIS REPORT
+    # ========================================================
 
     if particle_count > 0:
 
-        st.subheader("📄 Analysis Report")
+        st.subheader(
+            "📄 Analysis Report"
+        )
 
 
         report = ""
+
 
         report += (
             "AI-ASSISTED MICROPLASTIC SCREENING REPORT\n"
         )
 
+
         report += "=" * 60 + "\n\n"
 
 
-        # Image information
         report += (
-            f"Image: {uploaded_file.name}\n"
+            f"Image: "
+            f"{uploaded_file.name}\n"
         )
+
 
         report += (
             f"Image Dimensions: "
-            f"{image_width} x {image_height} pixels\n"
+            f"{image_width} x "
+            f"{image_height} pixels\n"
         )
+
 
         report += (
             f"Total Particles Detected: "
             f"{particle_count}\n"
         )
 
+
         report += (
-            f"Average Confidence: "
+            f"Average Detection Confidence: "
             f"{average_confidence * 100:.1f}%\n\n"
         )
 
 
+        # ----------------------------------------------------
+        # Classification summary
+        # ----------------------------------------------------
+
+        report += (
+            "MORPHOLOGY CLASSIFICATION\n"
+        )
+
+        report += "-" * 60 + "\n"
+
+
+        report += (
+            f"Fibre: "
+            f"{fibre_count}\n"
+        )
+
+
+        report += (
+            f"Fragment: "
+            f"{fragment_count}\n\n"
+        )
+
+
+        # ----------------------------------------------------
         # Risk assessment
+        # ----------------------------------------------------
+
         report += (
             "SCREENING RISK ASSESSMENT\n"
         )
 
         report += "-" * 60 + "\n"
 
+
         report += (
             f"Risk Score: "
             f"{risk_score:.1f}/100\n"
         )
+
 
         report += (
             f"Risk Level: "
@@ -761,27 +1322,34 @@ if uploaded_file is not None:
         )
 
 
+        # ----------------------------------------------------
         # Risk factors
+        # ----------------------------------------------------
+
         report += (
             "RISK FACTOR BREAKDOWN\n"
         )
 
         report += "-" * 60 + "\n"
 
+
         report += (
             f"Particle Density Score: "
             f"{density_score:.1f}/100\n"
         )
+
 
         report += (
             f"Detection Confidence Score: "
             f"{confidence_score:.1f}/100\n"
         )
 
+
         report += (
             f"Relative Particle Size Score: "
             f"{size_score:.1f}/100\n"
         )
+
 
         report += (
             f"Spatial Clustering Score: "
@@ -789,9 +1357,12 @@ if uploaded_file is not None:
         )
 
 
-        # Detection details
+        # ----------------------------------------------------
+        # Individual particles
+        # ----------------------------------------------------
+
         report += (
-            "DETECTION DETAILS\n"
+            "PARTICLE CLASSIFICATION DETAILS\n"
         )
 
         report += "-" * 60 + "\n"
@@ -800,23 +1371,35 @@ if uploaded_file is not None:
         for data in detection_data:
 
             report += (
-                f"Particle {data['particle']}\n"
+                f"Particle "
+                f"{data['particle']}: "
+                f"{data['classification'].title()}\n"
             )
 
+
             report += (
-                f"Confidence: "
-                f"{data['confidence'] * 100:.1f}%\n"
+                f"Classification Confidence: "
+                f"{data['classification_confidence'] * 100:.1f}%\n"
             )
+
+
+            report += (
+                f"Detection Confidence: "
+                f"{data['detection_confidence'] * 100:.1f}%\n"
+            )
+
 
             report += (
                 f"Width: "
                 f"{data['width']:.1f} pixels\n"
             )
 
+
             report += (
                 f"Height: "
                 f"{data['height']:.1f} pixels\n"
             )
+
 
             report += (
                 f"Bounding Box Area: "
@@ -824,12 +1407,16 @@ if uploaded_file is not None:
             )
 
 
-        # Scientific disclaimer
+        # ----------------------------------------------------
+        # Disclaimer
+        # ----------------------------------------------------
+
         report += (
             "IMPORTANT NOTE\n"
         )
 
         report += "-" * 60 + "\n"
+
 
         report += (
             "The risk score is a preliminary AI-assisted "
@@ -844,10 +1431,15 @@ if uploaded_file is not None:
         )
 
 
-        # Download button
+        # ----------------------------------------------------
+        # Download report
+        # ----------------------------------------------------
+
         st.download_button(
             label="📥 Download Analysis Report",
             data=report,
-            file_name="microplastic_analysis_report.txt",
+            file_name=(
+                "microplastic_analysis_report.txt"
+            ),
             mime="text/plain"
         )
