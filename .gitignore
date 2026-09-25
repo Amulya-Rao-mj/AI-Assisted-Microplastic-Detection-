@@ -5,3 +5,7 @@ MAJORPROJECT/
 venv/
 *.pyd
 *.dll
+.env
+
+runs/
+*.pt

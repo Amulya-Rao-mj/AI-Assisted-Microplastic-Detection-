@@ -1,0 +1,6 @@
+train: D:/MAJORPROJECT/microplastic_4class_source/train/images
+val: D:/MAJORPROJECT/microplastic_4class_source/valid/images
+test: D:/MAJORPROJECT/microplastic_4class_source/test/images
+
+nc: 4
+names: ['Fibre', 'Film', 'Fragment', 'microbeads']
